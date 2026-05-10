@@ -1,0 +1,483 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+<meta charset="UTF-8">
+<title>Excel Kod Takip - Dönem Yönetimli</title>
+
+<style>
+body { font-family: Arial; padding: 30px; }
+input, select, button { padding: 8px; margin: 4px 2px; }
+button { cursor: pointer; }
+table { border-collapse: collapse; margin-top: 20px; }
+
+th {
+    border: 1px solid #ccc;
+    padding: 6px;
+    width: 70px;
+    text-align: center;
+    background: black;
+    color: white;
+    font-weight: bold;
+}
+
+td {
+    border: 1px solid #ccc;
+    padding: 6px;
+    width: 70px;
+    text-align: center;
+    cursor: grab;
+}
+
+td:active { cursor: grabbing; }
+
+/* ─────────────── 13 RENK ─────────────── */
+.green    { background-color: #4CAF50; color: white; font-weight: bold; }
+.blue     { background-color: #2196F3; color: white; font-weight: bold; }
+.red      { background-color: #F44336; color: white; font-weight: bold; }
+.purple   { background-color: #9C27B0; color: white; font-weight: bold; }
+.orange   { background-color: #FF9800; color: white; font-weight: bold; }
+.pink     { background-color: #E91E63; color: white; font-weight: bold; }
+.teal     { background-color: #009688; color: white; font-weight: bold; }
+.indigo   { background-color: #3F51B5; color: white; font-weight: bold; }
+.lime     { background-color: #CDDC39; color: black; font-weight: bold; }
+.amber    { background-color: #FFC107; color: black; font-weight: bold; }
+.cyan     { background-color: #00BCD4; color: black; font-weight: bold; }
+.deeporange { background-color: #FF5722; color: white; font-weight: bold; }
+.brown    { background-color: #795548; color: white; font-weight: bold; }
+
+#counter { margin-top: 15px; font-weight: bold; }
+
+/* Silme butonu için özel stil */
+.btn-delete {
+    background-color: #f44336;
+    color: white;
+    border: none;
+    border-radius: 4px;
+}
+.btn-delete:hover {
+    background-color: #d32f2f;
+}
+</style>
+</head>
+<body>
+
+<h2>Excel Kod Takip (Dönem Yönetimli)</h2>
+
+<label>Dönem Seç:</label>
+<select id="periodSelect"></select>
+<button onclick="createNewPeriod()">Yeni Dönem Oluştur</button>
+<button class="btn-delete" onclick="deleteCurrentPeriod()">Bu Dönemi Sil</button>
+
+<br><br>
+
+<input type="text" id="searchInput" placeholder="Kod yaz...">
+<button onclick="searchCode()">Ara</button>
+
+<select id="colorSelect">
+    <option value="green">Yeşil</option>
+    <option value="blue">Mavi</option>
+    <option value="red">Kırmızı</option>
+    <option value="purple">Mor</option>
+    <option value="orange">Turuncu</option>
+    <option value="pink">Pembe</option>
+    <option value="teal">Turkuaz</option>
+    <option value="indigo">Lacivert</option>
+    <option value="lime">Limon</option>
+    <option value="amber">Kehribar</option>
+    <option value="cyan">Camgöbeği</option>
+    <option value="deeporange">Koyu Turuncu</option>
+    <option value="brown">Kahve</option>
+</select>
+
+<button onclick="resetAll()">Renkleri Temizle</button>
+<button onclick="exportAllToTxt()">TÜM Dönemleri Yedekle (İndir)</button>
+<input type="file" id="importFile" accept=".txt" style="display:none;" />
+<button onclick="document.getElementById('importFile').click()">TXT'den Yükle</button>
+
+<div id="counter"></div>
+<table id="excelTable"></table>
+
+<script>
+
+const MAX_COLS = 15;
+
+const defaultData = [
+["105","012","601","159","690","354","200","111","073","096","113","112","08-11","588","118"],
+["208","022","513","689","203","069","716","402","621","163","201","701","162","116","533"],
+["668","202","425","046","322","598","404","623","695","199","128","130","08-02","393","724"],
+["178","424","064","080","138","458","739","059","093","715","620","350","08-15","398","254"],
+["421","180","051","157","732","147","198","602","095","094","720","143","374","117","410"],
+["642","378","545","659","264","348","615","626","150","124","337","132","08-16","722","271"],
+["134","045","183","170","145","370","661","599","731","609","550","357","08-08","169","300"],
+["606","097","643","379","047","622","403","616","074","600","619","356","08-14","302","549"],
+["491","376","048","106","204","667","441","353","708","663","385","129","347","08-07","426"],
+["790","182","490","186","400","734","197","607","709","707","382","373","08-12","003","419"],
+["700","682","394","146","648","185","148","608","127","618","114","08-06","029","006","794"],
+["179","397","","","371","","662","189","","122","","","","","042"],
+["","","","","","","","","","","","","","",""],
+];
+
+const table = document.getElementById("excelTable");
+const counter = document.getElementById("counter");
+const periodSelect = document.getElementById("periodSelect");
+
+let data = [];
+let highlighted = {};
+let currentPeriod = "";
+let draggedCell = null;
+
+function loadPeriodList() {
+    const previousSelected = periodSelect.value;
+    periodSelect.innerHTML = "";
+    const keys = Object.keys(localStorage)
+        .filter(k => k.startsWith("tableData_"))
+        .map(k => k.replace("tableData_",""));
+
+    keys.forEach(k => {
+        const opt = document.createElement("option");
+        opt.value = k;
+        opt.textContent = k;
+        periodSelect.appendChild(opt);
+    });
+    
+    if(previousSelected && keys.includes(previousSelected)){
+        periodSelect.value = previousSelected;
+    }
+}
+
+function loadPeriod(periodKey) {
+    currentPeriod = periodKey;
+    const TABLE_KEY    = "tableData_" + periodKey;
+    const HIGHLIGHT_KEY = "highlighted_" + periodKey;
+
+    data = JSON.parse(localStorage.getItem(TABLE_KEY)) || JSON.parse(JSON.stringify(defaultData));
+    highlighted = JSON.parse(localStorage.getItem(HIGHLIGHT_KEY)) || {};
+
+    buildTable();
+}
+
+function savePeriod() {
+    localStorage.setItem("tableData_" + currentPeriod, JSON.stringify(data));
+    localStorage.setItem("highlighted_" + currentPeriod, JSON.stringify(highlighted));
+}
+
+function createNewPeriod() {
+    let periodName = prompt("Lütfen yeni dönem için bir isim giriniz (Örn: 2026-Mart):");
+    
+    if (periodName === null) return; 
+    
+    periodName = periodName.trim();
+    
+    if (periodName === "") {
+        const keys = Object.keys(localStorage)
+            .filter(k => k.startsWith("tableData_"))
+            .map(k => k.replace("tableData_", ""));
+        
+        let count = 1;
+        while(keys.includes("Dönem-" + count)) {
+            count++;
+        }
+        periodName = "Dönem-" + count;
+    }
+
+    if(localStorage.getItem("tableData_" + periodName)) {
+        alert("Bu isimde bir dönem zaten mevcut! Lütfen farklı bir isim deneyin.");
+        return;
+    }
+
+    const TABLE_KEY    = "tableData_" + periodName;
+    const HIGHLIGHT_KEY = "highlighted_" + periodName;
+
+    localStorage.setItem(TABLE_KEY, JSON.stringify(data));
+    localStorage.setItem(HIGHLIGHT_KEY, JSON.stringify({}));
+
+    loadPeriodList();
+    periodSelect.value = periodName;
+    loadPeriod(periodName);
+}
+
+// YENİ: Dönem Silme Fonksiyonu
+function deleteCurrentPeriod() {
+    if (!currentPeriod) return;
+
+    // Kullanıcıya onay sorusu
+    const confirmDelete = confirm(`"${currentPeriod}" dönemini silmek istediğinize emin misiniz? Bu işlem geri alınamaz!`);
+    
+    if (!confirmDelete) return;
+
+    // LocalStorage'dan ilgili verileri temizle
+    localStorage.removeItem("tableData_" + currentPeriod);
+    localStorage.removeItem("highlighted_" + currentPeriod);
+
+    alert(`"${currentPeriod}" başarıyla silindi.`);
+
+    // Listeyi yenile
+    loadPeriodList();
+
+    // Eğer silinen dönemden sonra geriye başka dönem kalmışsa ilkini yükle
+    if (periodSelect.options.length > 0) {
+        periodSelect.selectedIndex = 0;
+        loadPeriod(periodSelect.value);
+    } else {
+        // Hiç dönem kalmadıysa varsayılan Dönem-1'i tekrar oluştur
+        const initialKey = "Dönem-1";
+        localStorage.setItem("tableData_" + initialKey, JSON.stringify(defaultData));
+        localStorage.setItem("highlighted_" + initialKey, JSON.stringify({}));
+        loadPeriodList();
+        periodSelect.value = initialKey;
+        loadPeriod(initialKey);
+    }
+}
+
+periodSelect.addEventListener("change", () => {
+    if (periodSelect.value) loadPeriod(periodSelect.value);
+});
+
+function buildTable() {
+    table.innerHTML = "";
+    let totalCells = 0;
+
+    const headerRow = document.createElement("tr");
+    for (let i = 1; i <= MAX_COLS; i++) {
+        const th = document.createElement("th");
+        const displayNumber = ((i - 1 + 3) % MAX_COLS) + 1;
+        th.textContent = displayNumber;
+        headerRow.appendChild(th);
+    }
+    table.appendChild(headerRow);
+
+    data.forEach((row, r) => {
+        const tr = document.createElement("tr");
+        row.forEach((cell, c) => {
+            const td = document.createElement("td");
+            td.textContent = cell;
+            td.setAttribute("draggable", true);
+
+            if (cell !== "") totalCells++;
+
+            if (highlighted[cell]) td.classList.add(highlighted[cell]);
+
+            td.addEventListener("click", () => {
+                if (!cell) return;
+                const selectedColor = document.getElementById("colorSelect").value;
+                
+                td.className = td.className.replace(/\b(green|blue|red|purple|orange|pink|teal|indigo|lime|amber|cyan|deeporange|brown)\b/g, '').trim();
+
+                if (highlighted[cell] === selectedColor) {
+                    delete highlighted[cell];
+                } else {
+                    highlighted[cell] = selectedColor;
+                    td.classList.add(selectedColor);
+                }
+
+                savePeriod();
+                buildTable();
+            });
+
+            td.addEventListener("dragstart", () => draggedCell = td);
+            td.addEventListener("dragover", e => e.preventDefault());
+            td.addEventListener("drop", e => {
+                e.preventDefault();
+                if (!draggedCell || draggedCell === td) return;
+
+                const r1 = td.parentNode.rowIndex - 1;
+                const c1 = td.cellIndex;
+                const r2 = draggedCell.parentNode.rowIndex - 1;
+                const c2 = draggedCell.cellIndex;
+
+                const temp = data[r1][c1];
+                data[r1][c1] = data[r2][c2];
+                data[r2][c2] = temp;
+
+                savePeriod();
+                buildTable();
+            });
+
+            tr.appendChild(td);
+        });
+        table.appendChild(tr);
+    });
+
+    const marked = Object.keys(highlighted).length;
+    counter.textContent = `İşaretli Kod: ${marked} / Toplam Hücre: ${totalCells}`;
+}
+
+function searchCode() {
+    const input = document.getElementById("searchInput").value.trim();
+    if (!input) return;
+
+    const exists = data.flat().includes(input);
+    if (!exists) {
+        alert("Bu kod tabloda yok.");
+        document.getElementById("searchInput").value = "";
+        return;
+    }
+
+    const selectedColor = document.getElementById("colorSelect").value;
+    highlighted[input] = selectedColor;
+
+    savePeriod();
+    buildTable();
+    document.getElementById("searchInput").value = "";
+}
+
+function resetAll() {
+    highlighted = {};
+    savePeriod();
+    buildTable();
+}
+
+function exportAllToTxt() {
+    const keys = Object.keys(localStorage)
+        .filter(k => k.startsWith("tableData_"))
+        .map(k => k.replace("tableData_",""));
+
+    if (keys.length === 0) {
+        alert("Yedeklenecek hiçbir dönem bulunamadı.");
+        return;
+    }
+
+    let content = [
+        "=== Excel Kod Takip TOPLU Yedek ===",
+        "Tarih: " + new Date().toISOString().slice(0,19).replace("T"," "),
+        "Sürüm: 2.0",
+        "===================================",
+        ""
+    ];
+
+    keys.forEach(pName => {
+        const pData = JSON.parse(localStorage.getItem("tableData_" + pName));
+        const pHigh = JSON.parse(localStorage.getItem("highlighted_" + pName)) || {};
+
+        content.push(`[PERIOD_START]=${pName}`);
+        
+        content.push("[DATA]");
+        pData.forEach(row => content.push(row.join("|")));
+        
+        content.push("[HIGHLIGHTED]");
+        Object.entries(pHigh).forEach(([code, color]) => {
+            content.push(`${code}=${color}`);
+        });
+
+        content.push("[PERIOD_END]");
+        content.push(""); 
+    });
+
+    content.push("=== Son ===");
+
+    const blob = new Blob([content.join("\n")], { type: "text/plain;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `kod_takip_TUM_YEDEK.txt`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+}
+
+function importFromTxt(file) {
+    const reader = new FileReader();
+    reader.onload = function(e) {
+        try {
+            const text = e.target.result;
+            const lines = text.split("\n").map(l => l.trim());
+
+            let currentImportingPeriod = "";
+            let section = null;
+            let newData = [];
+            let newHighlighted = {};
+            let periodCount = 0;
+
+            for (let line of lines) {
+                if (line.startsWith("[PERIOD_START]=")) {
+                    currentImportingPeriod = line.split("=")[1];
+                    newData = [];
+                    newHighlighted = {};
+                    section = null;
+                    continue;
+                }
+                
+                if (line === "[DATA]")       { section = "data"; continue; }
+                if (line === "[HIGHLIGHTED]") { section = "highlighted"; continue; }
+                
+                if (line === "[PERIOD_END]") {
+                    if (currentImportingPeriod && newData.length > 0) {
+                        localStorage.setItem("tableData_" + currentImportingPeriod, JSON.stringify(newData));
+                        localStorage.setItem("highlighted_" + currentImportingPeriod, JSON.stringify(newHighlighted));
+                        periodCount++;
+                    }
+                    continue;
+                }
+
+                if (line.startsWith("===") || line === "" || line.startsWith("Tarih:") || line.startsWith("Sürüm:")) {
+                    continue;
+                }
+
+                if (section === "data" && line.includes("|")) {
+                    const row = line.split("|").map(v => v.trim());
+                    while (row.length < MAX_COLS) row.push("");
+                    if (row.length > MAX_COLS) row.length = MAX_COLS;
+                    newData.push(row);
+                }
+                else if (section === "highlighted" && line.includes("=")) {
+                    let [code, color] = line.split("=");
+                    code = code?.trim();
+                    color = color?.trim();
+                    if (code && color) {
+                        newHighlighted[code] = color;
+                    }
+                }
+            }
+
+            if (periodCount === 0) {
+                alert("Dosyada geçerli hiçbir dönem verisi bulunamadı!");
+                return;
+            }
+
+            loadPeriodList();
+            if (currentImportingPeriod) {
+                periodSelect.value = currentImportingPeriod;
+                loadPeriod(currentImportingPeriod);
+            }
+            
+            alert(`Yükleme başarılı!\nToplam ${periodCount} adet dönem içe aktarıldı.`);
+
+        } catch(err) {
+            alert("Dosya okunamadı veya format hatalı:\n" + err.message);
+        }
+    };
+    reader.readAsText(file);
+}
+
+document.getElementById("importFile").addEventListener("change", function(e) {
+    const file = e.target.files[0];
+    if (!file) return;
+    importFromTxt(file);
+    e.target.value = "";
+});
+
+document.getElementById("searchInput").addEventListener("keydown", function(e){
+    if(e.key === "Enter") searchCode();
+});
+
+// İlk açılış
+(function init(){
+    const initialKey = "Dönem-1";
+    const keys = Object.keys(localStorage).filter(k => k.startsWith("tableData_"));
+    if (keys.length === 0) {
+        localStorage.setItem("tableData_" + initialKey, JSON.stringify(defaultData));
+        localStorage.setItem("highlighted_" + initialKey, JSON.stringify({}));
+    }
+    
+    loadPeriodList();
+    
+    if (periodSelect.options.length > 0) {
+        loadPeriod(periodSelect.value);
+    }
+})();
+
+</script>
+</body>
+</html>
